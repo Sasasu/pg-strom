@@ -80,7 +80,7 @@ __xpuConnectAttachCommand(void *__priv, XpuCommand *xcmd)
 TEMPLATE_XPU_CONNECT_RECEIVE_COMMANDS(__xpuConnect)
 
 static void *
-__xpuConnectSessionWorker(void *__priv)
+__xpuConnectSessionWorker(void *__priv) // QQQ 新线程函数
 {
 	XpuConnection *conn = __priv;
 
@@ -934,7 +934,7 @@ __waitAndFetchNextXpuCommand(pgstromTaskState *pts, bool try_final_callback)
 }
 
 static XpuCommand *
-__fetchNextXpuCommand(pgstromTaskState *pts)
+__fetchNextXpuCommand(pgstromTaskState *pts) // QQQ 队列 这里隔离了两套执行器
 {
 	XpuConnection  *conn = pts->conn;
 	XpuCommand	   *xcmd;
@@ -1578,11 +1578,11 @@ pgstromExecInitTaskState(CustomScanState *node, EState *estate, int eflags)
 	Assert(depth_index == pts->num_rels);
 	
 	/*
-	 * Setup request buffer
+	 * Setup request buffer // QQQ 输入入口
 	 */
 	if (pts->arrow_state)		/* Apache Arrow */
 	{
-		pts->cb_next_chunk = pgstromScanChunkArrowFdw;
+		pts->cb_next_chunk = pgstromScanChunkArrowFdw; // QQQ 内部 CPU 数据入口
 		pts->cb_next_tuple = pgstromScanNextTuple;
 	    __setupTaskStateRequestBuffer(pts,
 									  NULL,
@@ -1591,7 +1591,7 @@ pgstromExecInitTaskState(CustomScanState *node, EState *estate, int eflags)
 	}
 	else if (pts->gcache_desc)		/* GPU-Cache */
 	{
-		pts->cb_next_chunk = pgstromScanChunkGpuCache;
+		pts->cb_next_chunk = pgstromScanChunkGpuCache; // QQQ GPU cache 输入
 		pts->cb_next_tuple = pgstromScanNextTuple;
 		__setupTaskStateRequestBuffer(pts,
 									  NULL,
@@ -1601,7 +1601,7 @@ pgstromExecInitTaskState(CustomScanState *node, EState *estate, int eflags)
 	else if (!bms_is_empty(pts->optimal_gpus) ||	/* GPU-Direct SQL */
 			 pts->ds_entry)							/* DPU Storage */
 	{
-		pts->cb_next_chunk = pgstromRelScanChunkDirect;
+		pts->cb_next_chunk = pgstromRelScanChunkDirect; // QQQ GPU direct 数据
 		pts->cb_next_tuple = pgstromScanNextTuple;
 		__setupTaskStateRequestBuffer(pts,
 									  tupdesc_src,
@@ -1610,7 +1610,7 @@ pgstromExecInitTaskState(CustomScanState *node, EState *estate, int eflags)
 	}
 	else						/* Slow normal heap storage */
 	{
-		pts->cb_next_chunk = pgstromRelScanChunkNormal;
+		pts->cb_next_chunk = pgstromRelScanChunkNormal; // QQQ heap 表数据
 		pts->cb_next_tuple = pgstromScanNextTuple;
 		__setupTaskStateRequestBuffer(pts,
 									  tupdesc_src,
@@ -1662,7 +1662,7 @@ pgstromExecScanAccess(pgstromTaskState *pts)
 	next_chunks:
 		if (pts->curr_resp)
 			xpuClientPutResponse(pts->curr_resp);
-		pts->curr_resp = __fetchNextXpuCommand(pts);
+		pts->curr_resp = __fetchNextXpuCommand(pts); // 有个队列
 		if (!pts->curr_resp)
 			return pgstromFetchFallbackTuple(pts);
 		resp = pts->curr_resp;
@@ -1852,7 +1852,7 @@ __pgstromExecTaskOpenConnection(pgstromTaskState *pts)
  * pgstromExecTaskState
  */
 TupleTableSlot *
-pgstromExecTaskState(CustomScanState *node)
+pgstromExecTaskState(CustomScanState *node) // QQQ 入口 2
 {
 	pgstromTaskState *pts = (pgstromTaskState *)node;
 	EState		   *estate = pts->css.ss.ps.state;
@@ -1887,7 +1887,7 @@ pgstromExecTaskState(CustomScanState *node)
 
 	for (;;)
 	{
-		slot = pgstromExecScanAccess(pts);
+		slot = pgstromExecScanAccess(pts); // QQQ 入口3
 		if (TupIsNull(slot))
 			break;
 		/* check whether the current tuple satisfies the qual-clause */
@@ -2529,7 +2529,7 @@ pgstromExplainTaskState(CustomScanState *node,
  * __xpuClientOpenSession
  */
 void
-__xpuClientOpenSession(pgstromTaskState *pts,
+__xpuClientOpenSession(pgstromTaskState *pts, // QQQ 后端
 					   const XpuCommand *session,
 					   pgsocket sockfd,
 					   const char *devname,
@@ -2564,7 +2564,7 @@ __xpuClientOpenSession(pgstromTaskState *pts,
 	 * after that.
 	 */
 	if ((rv = pthread_create(&conn->worker, NULL,
-							 __xpuConnectSessionWorker, conn)) != 0)
+							 __xpuConnectSessionWorker, conn)) != 0) // QQQ 线程
 		elog(ERROR, "failed on pthread_create: %s", strerror(rv));
 
 	/*

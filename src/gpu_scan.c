@@ -796,6 +796,7 @@ PlanXpuScanPathCommon(PlannerInfo *root,
 	/* code generation for the Projection */
 	context->tlist_dev = gpuscan_build_projection(baserel, pp_info, tlist);
 	pp_info->kexp_projection = codegen_build_projection(context);
+	// QQQ gpu 指令由 codegen 生成
 	/* VarLoads for each depth */
 	codegen_build_packed_kvars_load(context, pp_info);
 	/* VarMoves for each depth (only GPUs) */

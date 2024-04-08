@@ -946,7 +946,7 @@ pgstromRelScanChunkNormal(pgstromTaskState *pts,
 			if (!TTS_EMPTY(slot) &&
 				!__kds_row_insert_tuple(kds, slot))
 				break;
-			if (!table_scan_getnextslot(scan, estate->es_direction, slot))
+			if (!table_scan_getnextslot(scan, estate->es_direction, slot)) // QQQ 熟悉的扫表
 			{
 				pts->scan_done = true;
 				break;
@@ -962,7 +962,7 @@ pgstromRelScanChunkNormal(pgstromTaskState *pts,
 	/* setup iovec that may skip the hole between row-index and tuples-buffer */
 	sz1 = ((KDS_BODY_ADDR(kds) - pts->xcmd_buf.data) +
 		   MAXALIGN(sizeof(uint32_t) * kds->nitems));
-	sz2 = __kds_unpack(kds->usage);
+	sz2 = __kds_unpack(kds->usage); // 内部数据叫 kds。用 writev 走 pipe 写入到另一个 thread
 	Assert(sz1 + sz2 <= pts->xcmd_buf.len);
 	kds->length = (KDS_HEAD_LENGTH(kds) +
 				   MAXALIGN(sizeof(uint32_t) * kds->nitems) + sz2);
